@@ -452,3 +452,15 @@ coverage.json
 *.pfx
 *.msm
 *.msp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Solidity local env
+broadcast/
+out/
+
+# Temporary
+tmp/
+temp/
