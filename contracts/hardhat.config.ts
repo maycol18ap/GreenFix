@@ -3,6 +3,9 @@ import { configVariable, defineConfig } from "hardhat/config";
 
 export default defineConfig({
   plugins: [hardhatToolboxMochaEthersPlugin],
+  paths: {
+    sources: "./contracts", // Esto le dice que busque dentro de la carpeta interna
+  },
 
   solidity: {
     version: "0.8.28",
