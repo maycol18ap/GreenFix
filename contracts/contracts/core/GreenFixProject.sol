@@ -13,14 +13,20 @@ import "../libraries/Errors.sol";
 
 contract GreenFixProject is ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+    uint256 public guarantee;
+    bool public guaranteeDeposited;
+
+    uint256 public constant MIN_INVESTMENT = 10 * 1e6; // 10 USDC
+    //uint256 public constant MIN_INVESTMENT = 10 ether;
 
     // ────────────── STRUCTS ──────────────
 
     struct ProjectConfig {
         uint256 fundingGoal;
         uint256 interestBps;
-        uint256 platformFeeBps;      // comisión plataforma sobre intereses
+        uint256 platformFeeBps;
         uint256 fundingDeadline;
+        uint256 loanDurationInDays;
     }
 
     struct TimeConfig {
@@ -68,7 +74,7 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
 
     // Financiamiento
     uint256 public totalRaised;
-    uint256 public totalTokensMinted; // debe coincidir con totalRaised
+    //uint256 public totalTokensMinted; // debe coincidir con totalRaised
     bool public fundingFinalized;
 
     // Registro de inversores
@@ -143,6 +149,8 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
     event ProjectCompleted();
     event ProjectDefaulted();
     event FundingCancelled();
+    event FundingFinalized(uint256 totalRaised, uint256 milestonesCount);
+
 
     // ────────────── CONSTRUCTOR ──────────────
 
@@ -158,7 +166,9 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         uint256 _claimPeriod,
         uint256 _fundingDeadline,
         address _creator,
+        uint256 _loanDurationInDays,
         uint256 _guarantee
+        //guarantee = _guarantee // solo guarda el monto, no se transfiere aún
     ) {
         factory = _factory;
         usdc = IERC20(_usdc);
@@ -166,7 +176,8 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
             fundingGoal: _fundingGoal,
             interestBps: _interestBps,
             platformFeeBps: _platformFeeBps,
-            fundingDeadline: _fundingDeadline
+            fundingDeadline: _fundingDeadline,
+            loanDurationInDays: _loanDurationInDays
         });
         timeConfig = TimeConfig({
             votingDuration: _votingDuration,
@@ -176,6 +187,7 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         });
         creator = _creator;
         state = ProjectState.Funding;
+        guarantee = _guarantee;
 
         // Desplegar token del proyecto (no transferible)
         projectToken = new ProjectToken("GreenFix Project", "GPFT", address(this), factory);
@@ -183,22 +195,24 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         // El creador deposita garantía (se hace en constructor o antes)
         // require(usdc.transferFrom(creator, address(this), _guarantee), "Guarantee failed");
         // refundPool += _guarantee;
+        if (_loanDurationInDays == 0) revert InvalidDuration();
+        //if ((_loanDurationInDays * 1 days) % _repaymentInterval != 0) revert InvalidRepaymentInterval();
     }
 
     // ────────────── FUNCIONES (esqueleto) ──────────────
     // Las implementaremos fase por fase.
     // Por ahora, solo declaraciones vacías o con revert para que compile.
+    function cancelFunding()
+        external
+        onlyState(ProjectState.Funding)
+        onlyCreator
+        whenNotPaused
+    {
+        state = ProjectState.Refunding;
 
-    function invest(uint256 amount) external onlyState(ProjectState.Funding) nonReentrant whenNotPaused {
-        revert("Not implemented");
-    }
+        refundPool = totalRaised + guarantee;
 
-    function cancelFunding() external onlyState(ProjectState.Funding) onlyCreator whenNotPaused {
-        revert("Not implemented");
-    }
-
-    function finalizeFunding() external onlyState(ProjectState.Funding) whenNotPaused {
-        revert("Not implemented");
+        emit RefundActivated();
     }
 
     function requestMilestoneRelease(string calldata evidenceURI) external onlyState(ProjectState.Active) onlyCreator whenNotPaused {
@@ -251,5 +265,149 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
 
     function getPendingReward(address investor) external view returns (uint256) {
         revert("Not implemented");
+    }
+    function invest(uint256 amount)
+        external
+        onlyState(ProjectState.Funding)
+        nonReentrant
+        whenNotPaused
+    {
+        if (block.timestamp >= config.fundingDeadline)
+            revert FundingDeadlineExceeded();
+
+        if (!guaranteeDeposited)
+            revert GuaranteeNotDeposited();
+
+        if (totalRaised + amount > config.fundingGoal)
+            revert OverfundingNotAllowed();
+
+        if (amount < MIN_INVESTMENT)
+            revert BelowMinimumInvestment();
+
+        usdc.safeTransferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
+
+        totalRaised += amount;
+
+        projectToken.mint(msg.sender, amount);
+
+        if (!isInvestor[msg.sender]) {
+            isInvestor[msg.sender] = true;
+            investors.push(msg.sender);
+        }
+
+        emit Invested(msg.sender, amount, amount);
+    }
+    function finalizeFunding()
+        external
+        onlyState(ProjectState.Funding)
+        whenNotPaused
+    {
+        if (totalRaised != config.fundingGoal)
+            revert FundingGoalNotReached();
+
+        state = ProjectState.Active;
+
+        fundingFinalized = true;
+
+        uint8[4] memory percentages = [30, 30, 20, 20];
+
+        uint256 remaining = config.fundingGoal;
+
+        for (uint8 i = 0; i < percentages.length; i++) {
+
+            uint256 milestoneAmount =
+                (config.fundingGoal * percentages[i]) / 100;
+
+            if (i == percentages.length - 1) {
+                milestoneAmount = remaining;
+            }
+
+            milestones.push(
+                Milestone({
+                    percentage: percentages[i],
+                    amount: milestoneAmount,
+                    released: false,
+                    votingActive: false,
+                    voteStart: 0,
+                    voteEnd: 0,
+                    votesFor: 0,
+                    votesAgainst: 0,
+                    totalParticipation: 0,
+                    evidenceURI: ""
+                })
+            );
+
+            remaining -= milestoneAmount;
+        }
+
+        uint256 totalOwed =
+            config.fundingGoal +
+            ((config.fundingGoal * config.interestBps) / 10000);
+
+        uint256 durationSeconds =
+            config.loanDurationInDays * 1 days;
+
+        uint256 intervalSeconds =
+            timeConfig.repaymentInterval;
+
+        uint256 numberOfPayments =
+            durationSeconds / intervalSeconds;
+
+        uint256 paymentAmount =
+            totalOwed / numberOfPayments;
+
+        uint256 remainder =
+            totalOwed -
+            (paymentAmount * numberOfPayments);
+
+        uint256 dueDate =
+            block.timestamp + intervalSeconds;
+
+        for (uint256 i = 0; i < numberOfPayments; i++) {
+
+            uint256 thisPayment = paymentAmount;
+
+            if (i == numberOfPayments - 1) {
+                thisPayment += remainder;
+            }
+
+            repayments.push(
+                Repayment({
+                    dueDate: dueDate,
+                    amount: thisPayment,
+                    paid: false
+                })
+            );
+
+            dueDate += intervalSeconds;
+        }
+
+        emit FundingFinalized(
+            totalRaised,
+            milestones.length
+        );
+    }
+
+    function depositGuarantee()
+        external
+        onlyCreator
+        onlyState(ProjectState.Funding)
+    {
+        if (guaranteeDeposited)
+            revert GuaranteeAlreadyDeposited();
+
+        usdc.safeTransferFrom(
+            msg.sender,
+            address(this),
+            guarantee
+        );
+
+        guaranteeDeposited = true;
+
+        refundPool += guarantee;
     }
 }

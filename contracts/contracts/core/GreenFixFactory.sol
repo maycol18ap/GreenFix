@@ -52,7 +52,8 @@ contract GreenFixFactory is IGreenFixFactory {
         uint256 repaymentInterval,
         string calldata metadataURI
     ) external override returns (uint256 projectId) {
-        projectId = ++projectCount;
+        uint256 guarantee = (fundingGoal * 5) / 100;
+    projectId = ++projectCount;
 
         uint256 fundingDeadline = block.timestamp + 30 days; // ejemplo fijo o parametrizable
 
@@ -69,7 +70,8 @@ contract GreenFixFactory is IGreenFixFactory {
             defaultClaimPeriod,
             fundingDeadline,
             msg.sender,
-            0 // la garantía se deposita después del deploy (ver nota)
+            durationInDays,
+            guarantee
         );
 
         projects[projectId] = ProjectInfo({
