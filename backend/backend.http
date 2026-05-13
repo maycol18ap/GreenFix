@@ -1,6 +1,20 @@
 @backend_HostAddress = http://localhost:5029
+@contentType = application/json
 
-GET {{backend_HostAddress}}/weatherforecast/
-Accept: application/json
+### Obtener todos los proyectos
+GET {{backend_HostAddress}}/api/proyectos
+Accept: {{contentType}}
+
+### Obtener proyecto por ID
+GET {{backend_HostAddress}}/api/proyectos/1
+Accept: {{contentType}}
+
+### Obtener proyectos activos
+GET {{backend_HostAddress}}/api/proyectos/estado/Activo
+Accept: {{contentType}}
+
+### Obtener proyecto por ContractAddress
+GET {{backend_HostAddress}}/api/proyectos/contract/0x1234567890abcdef1234567890abcdef12345678
+Accept: {{contentType}}
 
 ###
