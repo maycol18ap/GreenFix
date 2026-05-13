@@ -47,3 +47,8 @@ error VotingNotActive();
 error VotingEnded();
 error InvalidMilestone();
 error NoVotingPower();
+error InvalidRepayment();
+error NoOverduePayments();
+error NoTokens();
+error NoRewards();
+error PreviousRepaymentNotPaid();

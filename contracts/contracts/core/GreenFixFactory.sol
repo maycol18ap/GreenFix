@@ -71,7 +71,8 @@ contract GreenFixFactory is IGreenFixFactory {
             fundingDeadline,
             msg.sender,
             durationInDays,
-            guarantee
+            guarantee,
+            feeCollector  
         );
 
         projects[projectId] = ProjectInfo({

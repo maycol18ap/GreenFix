@@ -105,13 +105,12 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
     // Votaciones
     mapping(uint256 => mapping(address => uint256)) public hasVotedNonce;    // Votación de default activa
     bool public defaultVoteActive;
-
+    address public feeCollector;
     // Contador de rechazos consecutivos
     uint256 public consecutiveRejectedMilestones;
 
     // Fee recolectado
     uint256 public platformFeeCollected;
-
     // ────────────── MODIFIERS ──────────────
 
     modifier onlyState(ProjectState expected) {
@@ -171,7 +170,8 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         uint256 _fundingDeadline,
         address _creator,
         uint256 _loanDurationInDays,
-        uint256 _guarantee
+        uint256 _guarantee,
+        address _feeCollector  // ← NUEVO
         //guarantee = _guarantee // solo guarda el monto, no se transfiere aún
     ) {
         factory = _factory;
@@ -192,6 +192,8 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         creator = _creator;
         state = ProjectState.Funding;
         guarantee = _guarantee;
+        feeCollector = _feeCollector;  // ← NUEVO
+
 
         // Desplegar token del proyecto (no transferible)
         projectToken = new ProjectToken("GreenFix Project", "GPFT", address(this), factory);
@@ -381,12 +383,71 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
     }
 }
 
-    function makeRepayment(uint256 repaymentIndex) external onlyState(ProjectState.Active) onlyCreator whenNotPaused {
-        revert("Not implemented");
+    function makeRepayment(uint256 repaymentIndex) 
+        external 
+        onlyState(ProjectState.Active) 
+        onlyCreator 
+        whenNotPaused 
+        nonReentrant
+    {
+        if (repaymentIndex >= repayments.length) revert InvalidRepayment();
+        
+        Repayment storage repayment = repayments[repaymentIndex];
+        
+        if (repayment.paid) revert PaymentAlreadyMade();
+
+        if (repaymentIndex > 0 && !repayments[repaymentIndex - 1].paid) {
+        revert PreviousRepaymentNotPaid();
+    }
+        
+        uint256 amount = repayment.amount;
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        
+        repayment.paid = true;
+        
+        // Separar capital e interés
+        uint256 totalOwed = config.fundingGoal + ((config.fundingGoal * config.interestBps) / 10000);
+        uint256 totalInterest = (config.fundingGoal * config.interestBps) / 10000;
+        uint256 interestPortion = (amount * totalInterest) / totalOwed;
+        uint256 principalPortion = amount - interestPortion;
+        
+        totalPrincipalRepaid += principalPortion;
+        totalInterestRepaid += interestPortion;
+        
+        emit RepaymentMade(msg.sender, amount);
+        
+        // Verificar si TODAS las cuotas están pagadas
+        bool allPaid = true;
+        for (uint256 i = 0; i < repayments.length; i++) {
+            if (!repayments[i].paid) {
+                allPaid = false;
+                break;
+            }
+        }
+        
+        if (allPaid) {
+            state = ProjectState.Completed;
+            emit ProjectCompleted();
+        }
     }
 
-    function triggerDefaultVote() external onlyState(ProjectState.Active) whenNotPaused {
-        revert("Not implemented");
+    function triggerDefaultVote() 
+        external 
+        onlyState(ProjectState.Active) 
+        whenNotPaused 
+    {
+        bool hasOverdue = false;
+        for (uint256 i = 0; i < repayments.length; i++) {
+            if (!repayments[i].paid && block.timestamp > repayments[i].dueDate + timeConfig.gracePeriod) {
+                hasOverdue = true;
+                break;
+            }
+        }
+        
+        if (!hasOverdue) revert NoOverduePayments();
+        
+        state = ProjectState.Defaulted;
+        emit ProjectDefaulted();
     }
 
     function activateRefunds() external whenNotPaused {
@@ -399,9 +460,43 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         revert("Not implemented");
     }
 
-    function claimRewards() external onlyInvestor nonReentrant whenNotPaused {
-        // permitido en Completed
-        revert("Not implemented");
+    function claimRewards() 
+        external 
+        onlyInvestor 
+        nonReentrant 
+        whenNotPaused 
+    {
+        if (state != ProjectState.Completed) revert InvalidState(ProjectState.Completed, state);
+        
+        uint256 userTokens = projectToken.balanceOf(msg.sender);
+        if (userTokens == 0) revert NoTokens();
+        
+        uint256 totalSupply = projectToken.totalSupply();
+        if (totalSupply == 0) revert NoTokens();
+        
+        // El inversor recibe capital + interés proporcional
+        uint256 totalRepaid = totalPrincipalRepaid + totalInterestRepaid;
+        uint256 totalClaimable = (userTokens * totalRepaid) / totalSupply;
+        uint256 alreadyClaimed = claimedRewards[msg.sender];
+        
+        if (totalClaimable <= alreadyClaimed) revert NoRewards();
+        
+        uint256 pending = totalClaimable - alreadyClaimed;
+        
+        // Fee de plataforma SOLO sobre la porción de interés
+        uint256 interestPortion = (pending * totalInterestRepaid) / totalRepaid;
+        uint256 platformFee = (interestPortion * config.platformFeeBps) / 10000;
+        uint256 userReward = pending - platformFee;
+        
+        claimedRewards[msg.sender] = totalClaimable;
+        platformFeeCollected += platformFee;
+        
+        if (userReward > 0) {
+            usdc.safeTransfer(msg.sender, userReward);
+        }
+        if (platformFee > 0) {
+            usdc.safeTransfer(feeCollector, platformFee);
+        }
     }
 
     // Funciones auxiliares (vistas)
