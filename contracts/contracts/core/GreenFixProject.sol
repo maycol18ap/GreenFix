@@ -41,12 +41,14 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         uint256 amount;
         bool released;
         bool votingActive;
+        bool extended;        // ← NUEVO
         uint256 voteStart;
         uint256 voteEnd;
         uint256 votesFor;
         uint256 votesAgainst;
         uint256 totalParticipation;
         string evidenceURI;
+        uint256 nonce;        // ← NUEVO
     }
 
     struct Repayment {
@@ -101,9 +103,11 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
     mapping(address => uint256) public claimedRewards;
 
     // Votaciones
-    mapping(uint256 => mapping(address => bool)) public hasVoted;
-    // Votación de default activa
+    mapping(uint256 => mapping(address => uint256)) public hasVotedNonce;    // Votación de default activa
     bool public defaultVoteActive;
+
+    // Contador de rechazos consecutivos
+    uint256 public consecutiveRejectedMilestones;
 
     // Fee recolectado
     uint256 public platformFeeCollected;
@@ -215,17 +219,167 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         emit RefundActivated();
     }
 
-    function requestMilestoneRelease(string calldata evidenceURI) external onlyState(ProjectState.Active) onlyCreator whenNotPaused {
-        revert("Not implemented");
+    function requestMilestoneRelease(string calldata evidenceURI) 
+        external 
+        onlyState(ProjectState.Active) 
+        onlyCreator 
+        whenNotPaused 
+    {
+        // Verificar que hay milestones disponibles
+        if (currentMilestone >= milestones.length) revert NoMoreMilestones();
+        
+        Milestone storage milestone = milestones[currentMilestone];
+        
+        // Verificar que no esté ya liberado
+        if (milestone.released) revert MilestoneAlreadyReleased();
+        
+        // Verificar que no haya votación activa
+        if (milestone.votingActive) revert VotingAlreadyActive();
+        
+        // Verificar que el proyecto no esté en default
+        // (ya cubierto por onlyState(Active))
+        
+        // Guardar evidencia
+        milestone.evidenceURI = evidenceURI;
+        milestone.extended = false;
+        // Iniciar votación
+        milestone.votingActive = true; // false
+        milestone.voteStart = block.timestamp;
+        milestone.voteEnd = block.timestamp + timeConfig.votingDuration;
+        milestone.votesFor = 0;
+        milestone.votesAgainst = 0;
+        milestone.totalParticipation = 0;
+        // Limpiar votos anteriores del milestone
+        milestone.extended = false;
+        milestone.nonce++;
+        
+        // Cambiar estado a Voting
+        state = ProjectState.Voting;
+        
+        emit MilestoneVotingStarted(currentMilestone, milestone.voteStart, milestone.voteEnd);
+    }
+    function vote(uint256 milestoneId, bool support) 
+        external 
+        onlyState(ProjectState.Voting) 
+        onlyInvestor 
+        whenNotPaused 
+    {
+        // Verificar que el milestone es el actual
+        if (milestoneId != currentMilestone) revert InvalidMilestone();
+        
+        Milestone storage milestone = milestones[milestoneId];
+        
+        // Verificar que la votación esté activa
+        if (!milestone.votingActive) revert VotingNotActive();
+        
+        // Verificar que no haya votado ya
+        if (hasVotedNonce[milestoneId][msg.sender] == milestone.nonce) revert AlreadyVoted();
+        
+        // Verificar que la votación no haya terminado
+        if (block.timestamp >= milestone.voteEnd) revert VotingEnded();
+        
+        // Obtener peso del voto = balance de tokens
+        uint256 weight = projectToken.balanceOf(msg.sender);
+        if (weight == 0) revert NoVotingPower();
+        
+        // Registrar voto
+        hasVotedNonce[milestoneId][msg.sender] = milestone.nonce;
+        
+        if (support) {
+            milestone.votesFor += weight;
+        } else {
+            milestone.votesAgainst += weight;
+        }
+        milestone.totalParticipation += weight;
+        
+        emit Voted(msg.sender, milestoneId, support, weight);
     }
 
-    function vote(uint256 milestoneId, bool support) external onlyState(ProjectState.Voting) onlyInvestor whenNotPaused {
-        revert("Not implemented");
+    function finalizeVoting(uint256 milestoneId) 
+    external 
+    onlyState(ProjectState.Voting) 
+    whenNotPaused 
+{
+    // Verificar que el milestone es el actual
+    if (milestoneId != currentMilestone) revert InvalidMilestone();
+    
+    Milestone storage milestone = milestones[milestoneId];
+    
+    // Verificar que la votación esté activa
+    if (!milestone.votingActive) revert VotingNotActive();
+    
+    // Verificar que haya terminado el tiempo
+    //if (block.timestamp < milestone.voteEnd) revert VotingNotEnded();
+    
+    uint256 totalSupply = projectToken.totalSupply();
+    if (totalSupply == 0) revert NoVotingPower();
+    uint256 participationPercent = (milestone.totalParticipation * 100) / totalSupply;
+    
+    // Verificar quorum mínimo (51%)
+    if (participationPercent < 51) {
+        // Sin quorum: extender 24 horas (solo primera vez)
+        if (!milestone.extended) {
+            milestone.voteEnd += 24 hours;
+            milestone.extended = true;
+            return; // No finalizar aún
+        } else {
+            // Segunda vez sin quorum: rechazar automáticamente
+            milestone.votingActive = false;
+            milestone.released = false;
+            consecutiveRejectedMilestones++;
+            state = ProjectState.Active;
+            
+            if (consecutiveRejectedMilestones >= 2) {
+                state = ProjectState.Defaulted;
+                emit ProjectDefaulted();
+            }
+            return;
+        }
     }
-
-    function finalizeVoting(uint256 milestoneId) external onlyState(ProjectState.Voting) whenNotPaused {
-        revert("Not implemented");
+    
+    // Verificar mayoría simple
+    if (milestone.votesFor > milestone.votesAgainst) {
+        // Aprobado
+        milestone.released = true;
+        milestone.votingActive = false;
+        consecutiveRejectedMilestones = 0;
+    if (usdc.balanceOf(address(this)) < milestone.amount) {
+        revert NotEnoughBalance();
+    }    
+        // Liberar fondos al creador
+        usdc.safeTransfer(creator, milestone.amount);
+        totalReleased += milestone.amount;
+        
+        // Avanzar al siguiente milestone
+        currentMilestone++;
+        if (currentMilestone >= milestones.length) {
+        state = ProjectState.Completed;
+        emit ProjectCompleted();
+    }else {
+        state = ProjectState.Active;
     }
+        
+        // Volver a Active
+        state = ProjectState.Active;
+        
+        emit MilestoneApproved(milestoneId);
+        emit FundsReleased(milestoneId, milestone.amount);
+    } else {
+        // Rechazado
+        milestone.votingActive = false;
+        milestone.released = false;
+        consecutiveRejectedMilestones++;
+        
+        // Volver a Active
+        state = ProjectState.Active;
+        
+        // Verificar doble rechazo
+        if (consecutiveRejectedMilestones >= 2) {
+            state = ProjectState.Defaulted;
+            emit ProjectDefaulted();
+        }
+    }
+}
 
     function makeRepayment(uint256 repaymentIndex) external onlyState(ProjectState.Active) onlyCreator whenNotPaused {
         revert("Not implemented");
@@ -332,12 +486,14 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
                     amount: milestoneAmount,
                     released: false,
                     votingActive: false,
+                    extended: false,
                     voteStart: 0,
                     voteEnd: 0,
                     votesFor: 0,
                     votesAgainst: 0,
                     totalParticipation: 0,
-                    evidenceURI: ""
+                    evidenceURI: "",
+                    nonce:0
                 })
             );
 
