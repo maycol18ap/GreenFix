@@ -111,6 +111,8 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
 
     // Fee recolectado
     uint256 public platformFeeCollected;
+
+    uint256 public refundTotalSupplySnapshot;   // Nuevo
     // ────────────── MODIFIERS ──────────────
 
     modifier onlyState(ProjectState expected) {
@@ -214,11 +216,11 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         onlyCreator
         whenNotPaused
     {
-        state = ProjectState.Refunding;
+        state = ProjectState.Cancelled;
 
         refundPool = totalRaised + guarantee;
 
-        emit RefundActivated();
+        //emit RefundActivated();
     }
 
     function requestMilestoneRelease(string calldata evidenceURI) 
@@ -450,16 +452,51 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         emit ProjectDefaulted();
     }
 
-    function activateRefunds() external whenNotPaused {
-        // permitido en Defaulted o Cancelled
-        revert("Not implemented");
+    function activateRefunds() 
+        external 
+        whenNotPaused 
+    {
+        if (state != ProjectState.Defaulted && state != ProjectState.Cancelled) {
+            revert InvalidState(ProjectState.Defaulted, state);
+        }
+        
+        refundPool = usdc.balanceOf(address(this));
+        refundTotalSupplySnapshot = projectToken.totalSupply(); // ← SNAPSHOT
+        
+        state = ProjectState.Refunding;
+        
+        emit RefundActivated();
     }
 
-    function claimRefund() external onlyInvestor nonReentrant whenNotPaused {
-        // permitido en Refunding
-        revert("Not implemented");
+    function claimRefund() 
+        external 
+        onlyInvestor 
+        nonReentrant 
+        whenNotPaused 
+    {
+        if (state != ProjectState.Refunding) {
+            revert InvalidState(ProjectState.Refunding, state);
+        }
+        
+        if (hasClaimedRefund[msg.sender]) {
+            revert RefundAlreadyClaimed();
+        }
+        
+        uint256 userTokens = projectToken.balanceOf(msg.sender);
+        if (userTokens == 0) revert NoTokens();
+        
+        uint256 totalSupply = refundTotalSupplySnapshot; // ← USA SNAPSHOT
+        uint256 refundAmount = (userTokens * refundPool) / totalSupply;
+        
+        if (refundAmount == 0) revert NoRefundAvailable();
+        
+        hasClaimedRefund[msg.sender] = true;
+        
+        projectToken.burn(msg.sender, userTokens);
+        usdc.safeTransfer(msg.sender, refundAmount);
+        
+        emit RefundClaimed(msg.sender, refundAmount);
     }
-
     function claimRewards() 
         external 
         onlyInvestor 
@@ -508,8 +545,23 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         return repayments.length;
     }
 
-    function getRefundAmount(address investor) external view returns (uint256) {
-        revert("Not implemented");
+    function getRefundAmount(address investor) 
+        external 
+        view 
+        returns (uint256) 
+    {
+        if (state != ProjectState.Refunding) {
+            return 0;
+        }
+        
+        uint256 userTokens = projectToken.balanceOf(investor);
+        uint256 totalSupply = refundTotalSupplySnapshot; // ← USA SNAPSHOT
+        
+        if (userTokens == 0 || totalSupply == 0) {
+            return 0;
+        }
+        
+        return (userTokens * refundPool) / totalSupply;
     }
 
     function getPendingReward(address investor) external view returns (uint256) {

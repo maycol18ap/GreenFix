@@ -124,7 +124,7 @@ contract FundingTest {
         
         project.cancelFunding();
         
-        assert(uint256(project.state()) == 3);
+        assert(uint256(project.state()) == 5);
     }
 
     function testFinalizeFunding() public {

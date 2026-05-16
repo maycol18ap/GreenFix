@@ -52,3 +52,5 @@ error NoOverduePayments();
 error NoTokens();
 error NoRewards();
 error PreviousRepaymentNotPaid();
+
+error NoRefundAvailable();
