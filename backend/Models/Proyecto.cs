@@ -7,8 +7,11 @@ public class Proyecto
     public string Descripcion { get; set; } = string.Empty;
     public decimal MontoObjetivo { get; set; }
     public decimal MontoActual { get; set; }
+    public decimal Interes { get; set; }           // ← NUEVO
+    public int DuracionMeses { get; set; }         // ← NUEVO
+    public decimal Garantia { get; set; }          // ← NUEVO
     public string ContractAddress { get; set; } = string.Empty;
-    public string Estado { get; set; } = "Activo";
+    public string Estado { get; set; } = "Funding";
     public DateTime FechaCreacion { get; set; } = DateTime.UtcNow;
     public DateTime? FechaFinalizacion { get; set; }
     public int EmprendedorId { get; set; }

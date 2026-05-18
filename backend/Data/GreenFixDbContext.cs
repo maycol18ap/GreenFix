@@ -45,6 +45,10 @@ public class GreenFixDbContext : DbContext
             entity.Property(e => e.Descripcion).HasColumnName("Descripcion");
             entity.Property(e => e.MontoObjetivo).HasColumnType("decimal(18,2)");
             entity.Property(e => e.MontoActual).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Interes).HasColumnType("decimal(5,2)");        // ← NUEVO
+            entity.Property(e => e.DuracionMeses).IsRequired();               // ← NUEVO
+            entity.Property(e => e.Garantia).HasColumnType("decimal(18,2)");      // ← NUEVO
+            entity.Property(e => e.ContractAddress).HasMaxLength(42);         // ← AGREGAR config
             entity.Property(e => e.Estado).HasMaxLength(30).HasDefaultValue("Funding");
             entity.Property(e => e.FechaCreacion).HasDefaultValueSql("GETDATE()");
             // FK

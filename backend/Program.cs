@@ -1,8 +1,38 @@
 using backend.Data;
 using Microsoft.EntityFrameworkCore;
 
+using System.Diagnostics; //para usar datos del sistema
+
 var builder = WebApplication.CreateBuilder(args);
 
+string wslHost = "localhost"; 
+try
+{
+    // lee la IP asignada por WSL al Windows real sobre la marcha
+    var process = new Process
+    {
+        StartInfo = new ProcessStartInfo
+        {
+            FileName = "sh",
+            Arguments = "-c \"ip route | grep default | awk '{print $3}'\"",
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        }
+    };
+    process.Start();
+    string output = process.StandardOutput.ReadToEnd().Trim();
+    process.WaitForExit();
+
+    if (!string.IsNullOrEmpty(output))
+    {
+        wslHost = output; // si usamos la IP dinamica la usamos
+    }
+}
+catch
+{
+    wslHost = "localhost"; // Fallback por si acaso
+}
 // Add services to the container.
 builder.Services.AddControllers();
 // Swagger/OpenAPI (Swashbuckle)
@@ -10,8 +40,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 // Configurar Entity Framework Core con SQL Server
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
-    ?? "Server=(localdb)\\MSSQLLocalDB;Database=practicadb;Integrated Security=true;";
+var connectionString = $"Server={wslHost},1433;Database=GreenFix;User Id=greenfix_user;Password=GreenFix123!;TrustServerCertificate=True;";
 
 builder.Services.AddDbContext<GreenFixDbContext>(options =>
     options.UseSqlServer(connectionString));

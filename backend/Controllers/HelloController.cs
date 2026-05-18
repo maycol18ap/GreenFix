@@ -14,7 +14,7 @@ namespace backend.Controllers
             _context = context;
         }
 
-        [HttpGet("/")]
+        [HttpGet("")]
         public async Task<IActionResult> Get()
         {
             bool dbConnected = false;
