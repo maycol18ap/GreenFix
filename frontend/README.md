@@ -1,16 +1,52 @@
-# React + Vite
+# GreenFix — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Aplicación SPA en **React 19 + Vite** conectada a la blockchain mediante **ethers.js v6**. Es la interfaz principal de GreenFix.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **React 19** con Vite como bundler
+- **Tailwind CSS v4** para estilos
+- **ethers.js v6** para interacción con la blockchain
+- **Framer Motion** para animaciones
+- **Lucide React** para iconos
 
-## React Compiler
+## Scripts
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install     # instalar dependencias
+npm run dev     # desarrollo en http://localhost:5173
+npm run build   # build de producción en dist/
+npm run preview # servir build localmente
+npm run lint    # ESLint
+```
 
-## Expanding the ESLint configuration
+## Estructura
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```
+src/
+├── blockchain/          # Capa de conexión con blockchain
+│   ├── web3Service.js   # Funciones on-chain (invest, vote, create, etc.)
+│   ├── contractsConfig.js # Direcciones actualizadas por el deploy
+│   └── abis/            # ABIs de los contratos
+├── components/          # Componentes UI reutilizables
+├── context/
+│   └── AppContext.jsx   # Estado global (usuario, proyectos, wallet)
+├── hooks/
+│   ├── useProject.js    # Lógica de un proyecto individual
+│   └── useFactory.js    # Interacción con GreenFixFactory
+├── views/
+│   ├── Home.jsx         # Landing page
+│   ├── Dashboard.jsx    # Lista de proyectos
+│   ├── ProjectDetail.jsx # Detalle: inversión, milestones, votación, pagos
+│   └── CreateProject.jsx # Formulario de creación con KYC simulado
+├── App.jsx
+└── main.jsx
+```
+
+## Conexión con blockchain
+
+El frontend se conecta directamente al nodo (Hardhat local o Polygon Amoy) mediante MetaMask. **No depende del backend** para las operaciones financieras.
+
+Las operaciones on-chain incluyen: crear proyecto, invertir, votar, finalizar votación, solicitar liberación de hito, pagar cuotas, reclamar recompensas y reclamar reembolsos.
+
+El backend se usa exclusivamente para: metadata de proyectos (nombre, descripción, imagen) y estadísticas/auditoría.

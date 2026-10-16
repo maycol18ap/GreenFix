@@ -577,7 +577,11 @@ contract GreenFixProject is ReentrancyGuard, Pausable {
         if (totalRaised + amount > config.fundingGoal)
             revert OverfundingNotAllowed();
 
-        if (amount < MIN_INVESTMENT)
+        // El mínimo protege inversiones normales, pero se permite la inversión
+        // que cierra EXACTAMENTE la meta aunque sea menor (evita la "zona muerta"
+        // cuando el remanente queda entre 1 y MIN_INVESTMENT-1 USDC).
+        bool completaMeta = (totalRaised + amount == config.fundingGoal);
+        if (amount < MIN_INVESTMENT && !completaMeta)
             revert BelowMinimumInvestment();
 
         usdc.safeTransferFrom(

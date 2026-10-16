@@ -258,6 +258,15 @@ export default function ProjectDetail() {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
+              {remaining > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAmount(String(remaining))}
+                  className="mt-2 text-sm font-bold text-primary hover:underline"
+                >
+                  Invertir lo restante ({remaining} USDC)
+                </button>
+              )}
               <Button onClick={handleInvest} className="mt-4 w-full" disabled={txPending}>
                 {txPending ? "Procesando..." : "Invertir"}
               </Button>

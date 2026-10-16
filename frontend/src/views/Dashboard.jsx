@@ -101,6 +101,9 @@ export default function Dashboard() {
         <div className="grid gap-8 md:grid-cols-3">
           {visibleProjects.map((project) => {
             const progress = Math.min((project.raised / project.goal) * 100, 100);
+            // No mostrar "100%" hasta que la meta se alcance de verdad (evita el
+            // redondeo engañoso de 99.9% → 100% cuando aún faltan unos USDC).
+            const progressLabel = project.raised >= project.goal ? 100 : Math.min(99, Math.floor(progress));
 
             return (
               <Card key={project.id} className="overflow-hidden">
@@ -114,7 +117,7 @@ export default function Dashboard() {
 
                   <div className="mt-5 flex justify-between text-sm">
                     <span className="text-text-muted">Meta: {project.goal} USDC</span>
-                    <span className="font-bold text-primary">{Math.round(progress)}%</span>
+                    <span className="font-bold text-primary">{progressLabel}%</span>
                   </div>
 
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
